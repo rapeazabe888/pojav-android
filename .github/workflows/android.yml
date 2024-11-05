@@ -1,118 +1,58 @@
-name: Android CI
+- uses: actions/setup-node@v4
+  with:
+    # Version Spec of the version to use in SemVer notation.
+    # It also admits such aliases as lts/*, latest, nightly and canary builds
+    # Examples: 12.x, 10.15.1, >=10.15.0, lts/Hydrogen, 16-nightly, latest, node
+    node-version: ''
 
-on:
-  pull_request:
-    branches-ignore:
-      - 'l10n_v3_openjdk2'
-    types: [ opened, reopened ]
-  push:
-    branches-ignore:
-      - 'l10n_v3_openjdk2'
-  workflow_dispatch:
+    # File containing the version Spec of the version to use.  Examples: package.json, .nvmrc, .node-version, .tool-versions.
+    # If node-version and node-version-file are both provided the action will use version from node-version. 
+    node-version-file: ''
 
-jobs:
-  build:
-    runs-on: ubuntu-22.04
-    env:
-      GPLAY_KEYSTORE_PASSWORD: ${{ secrets.GPLAY_KEYSTORE_PASSWORD }}
-      CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+    # Set this option if you want the action to check for the latest available version 
+    # that satisfies the version spec.
+    # It will only get affect for lts Nodejs versions (12.x, >=10.15.0, lts/Hydrogen). 
+    # Default: false
+    check-latest: false
 
-      - name: Set up JDK 8
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '8'
+    # Target architecture for Node to use. Examples: x86, x64. Will use system architecture by default.
+    # Default: ''. The action use system architecture by default 
+    architecture: ''
 
-      - name: Get JRE 8
-        uses: dawidd6/action-download-artifact@v2
-        with:
-          workflow: build.yml
-          path: app_pojavlauncher/src/main/assets/components/jre
-          workflow_conclusion: success
-          repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: buildjre8
-          name: jre8-pojav
+    # Used to pull node distributions from https://github.com/actions/node-versions. 
+    # Since there's a default, this is typically not supplied by the user. 
+    # When running this action on github.com, the default value is sufficient. 
+    # When running on GHES, you can pass a personal access token for github.com if you are experiencing rate limiting.
+    #
+    # We recommend using a service account with the least permissions necessary. Also
+    # when generating a new PAT, select the least scopes necessary.
+    #
+    # [Learn more about creating and using encrypted secrets](https://help.github.com/en/actions/automating-your-workflow-with-github-actions/creating-and-using-encrypted-secrets)
+    #
+    # Default: ${{ github.server_url == 'https://github.com' && github.token || '' }}
+    token: ''
 
-      - name: Get JRE17
-        uses: dawidd6/action-download-artifact@v2
-        with:
-          workflow: build.yml
-          path: app_pojavlauncher/src/main/assets/components/jre-new
-          workflow_conclusion: success
-          repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: buildjre17-21
-          name: jre17-pojav
+    # Used to specify a package manager for caching in the default directory. Supported values: npm, yarn, pnpm.
+    # Package manager should be pre-installed
+    # Default: ''
+    cache: ''
 
-      - uses: gradle/gradle-build-action@v2
-        with:
-          gradle-version: 7.6.1
+    # Used to specify the path to a dependency file: package-lock.json, yarn.lock, etc. 
+    # It will generate hash from the target file for primary key. It works only If cache is specified.  
+    # Supports wildcards or a list of file names for caching multiple dependencies.
+    # Default: ''
+    cache-dependency-path: ''
 
-      - name: Build JRE JAR files
-        run: |
-          ./scripts/languagelist_updater.sh
+    # Optional registry to set up for auth. Will set the registry in a project level .npmrc and .yarnrc file, 
+    # and set up auth to read in from env.NODE_AUTH_TOKEN.
+    # Default: ''
+    registry-url: ''
 
-          mkdir out
-          # Build JRE JAR files (security manager, etc...)
-          gradle :jre_lwjgl3glfw:build --no-daemon
+    # Optional scope for authenticating against scoped registries. 
+    # Will fall back to the repository owner when using the GitHub Packages registry (https://npm.pkg.github.com/).
+    # Default: ''
+    scope: ''
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Build Google Play .aab
-        if: github.repository_owner == 'PojavLauncherTeam' && github.ref_name == 'v3_openjdk'
-        run: |
-          gradle :app_pojavlauncher:bundleGplay
-          mv app_pojavlauncher/build/outputs/bundle/gplay/app_pojavlauncher-gplay.aab out/app-gplay.aab
-
-      - name: Build Debug .apk
-        run: |
-          # Build the launcher
-          gradle :app_pojavlauncher:assembleDebug
-          mv app_pojavlauncher/build/outputs/apk/debug/app_pojavlauncher-debug.apk out/app-debug.apk
-
-      - name: Build APK without runtime
-        run: |
-          rm -r app_pojavlauncher/src/main/assets/components/jre
-          rm -r app_pojavlauncher/src/main/assets/components/jre-new
-          gradle assembleDebug
-          mv app_pojavlauncher/build/outputs/apk/debug/app_pojavlauncher-debug.apk out/app-debug-noruntime.apk
-      - name: Gen md5sums
-        run: |
-          md5sum out/app-debug.apk > out/app-debug.md5
-          md5sum out/app-debug-noruntime.apk > out/app-debug-noruntime.md5
-          
-      - name: Upload APK
-        uses: actions/upload-artifact@v3
-        with:
-          name: app-debug
-          path: out/app-debug.*
-      
-      - name: Upload AAB
-        uses: actions/upload-artifact@v3
-        with:
-          name: app-release-aab
-          path: out/app-gplay.aab
-
-      - name: Upload onto the Google Play testing track
-        continue-on-error: true
-        if: github.repository_owner == 'PojavLauncherTeam' && github.ref_name == 'v3_openjdk'
-        uses: r0adkll/upload-google-play@v1.1.2
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.GPLAY_SERVICE_JSON }}
-          packageName: net.kdt.pojavlaunch
-          releaseFiles: out/app-gplay.aab
-          track: internal
-          inAppUpdatePriority: 5
-
-      - name: Upload APK (without runtime)
-        uses: actions/upload-artifact@v3
-        with:
-          name: app-debug-noruntime
-          path: out/app-debug-noruntime.*
-
+    # Set always-auth option in npmrc file.
+    # Default: ''
+    always-auth: ''
